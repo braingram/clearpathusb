@@ -1,0 +1,112 @@
+Tested with a CPM-MCVC-2310S-RLN
+
+When plugged in, the usb connection appears as a serial port (tested under
+windows and mac). The connection begins with at baud 9600 then after some
+negotiation it restarts at baud 230400 (see below).
+
+The general protocol is a
+
+byte 1: packet id
+byte 2: data payload length
+byte 3+: data payload (length set by byte 2)
+byte n: checksum
+
+One example packet is:
+[240, 3, 9, 48, 0, 84]
+
+Broken apart the packet is:
+
+byte 1: packet id = 240
+byte 2: data payload length = 3
+byte 3-5: data payload = [9, 48, 0]
+byte 6: checksum = 84
+
+Packet ids always have their MSB set to 1. All other bytes have their MSB
+set to 0.
+
+The checksum can be computed as follows:
+
+((0xFF - sum(packet)) + 1) & 0x7F
+
+where packet contains the packet id, data payload length and data payload.
+
+So far I've observed the following packet ids:
+
+128 (0x80)
+144 (0x90)
+176 (0xb0)
+208 (0xd0)
+209 (0xd1)
+240 (0xf0)
+
+Packet id 240 (0xf0) seems to set the baud rate. The connection starts at
+9000 baud. After a write (from host to motor) of:
+[240, 3, 9, 48, 0, 84]
+and subsequent read (from motor to host) of the same packet the baud rate
+changes to 230400. With some testing it's helpful to add a delay of 200 ms
+after baud rate changes.
+
+After this initial baud rate negotiation other packets can be sent and
+received at the new rate.
+
+Packet id 128 (0x80) appears to be some sort of set parameter command. With the
+motor set in "Move to absolute position (2-position)" mode, the velocity of
+movement can be set by sending two packets:
+
+[128, 7, 1, 122, 28, 124, 107, 11, 0, 112]
+[128, 7, 1, 122, 30, 124, 107, 11, 0, 110]
+
+My (rough) understanding of these packets are:
+128: write
+7: data length
+1: might also be part of the parameter id
+122: parameter id to set
+28/30: least significant byte of parameter value
+124, 107, 11, 0: additional parameter value bytes
+112/110: checksum
+
+So far I've seen parameter ids of:
+
+1, 122: velocity
+1, 124: acceleration
+12, 32: A+ (position to move to)
+
+The value for 
+
+The parameter value is broken up into:
+1st byte: 5 lowest bits of value
+  least significant bit is always 0
+  for first packet, 2nd LSB is 0, for second packet, 2nd LSB is 1
+additional bytes: 7 additional bits per byte
+
+so the bits for a paremeter value are broken up into bytes as follows:
+
+Byte 1: Bits 0-4
+Byte 2: Bits 5-11
+Byte 3: Bits 12-18
+etc...
+
+Being unsure of internal units, parameter values need to be scaled based on an
+empirical scaling value. For velocity, the parameter value appears to be:
+
+rpm * 8279.2205
+
+for acceleration the parameter value appears to be:
+
+rpm/s * 2.45138
+
+for A+ there doesn't appear to be any scaling
+
+
+
+Files
+======
+Included is the python script used during testing that has functions to connect
+to the motor and set the velocity and acceleration.
+
+Also included is an arduino sketch that uses the teensy 3.6 (the only
+supported board) usb host library to set the velocity and acceleration. This
+sketch also has options to set (through GPIO pins) the enable and input a
+states and read the HLFB pin (set to ASG).
+
+Enjoy!
